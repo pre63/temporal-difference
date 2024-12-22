@@ -1,5 +1,4 @@
 import gymnasium as gym
-# import timelimit warapper
 from gymnasium.wrappers import TimeLimit
 
 
@@ -42,7 +41,7 @@ class FrozenLakeWrapper(gym.Wrapper):
     return state, reward, terminated, truncated, info
 
 
-def make_frozen_lake(render_mode=None):
+def make_frozen_lake(render_mode=None, max_episode_steps=50):
   env = gym.make("FrozenLake-v1", is_slippery=False, render_mode=render_mode)
-  env = TimeLimit(env, max_episode_steps=100)
+  env = TimeLimit(env, max_episode_steps=max_episode_steps)
   return FrozenLakeWrapper(env)

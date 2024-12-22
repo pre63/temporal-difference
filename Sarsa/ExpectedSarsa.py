@@ -1,5 +1,6 @@
 
 import numpy as np
+from itertools import product
 
 
 class ExpectedSarsa:
@@ -62,24 +63,23 @@ class ExpectedSarsaCV:
     self.action_space_size = env.action_space.n
     self.results = []
 
-  def search(self):
+  def search(self, episodes=10000):
 
     # Train and evaluate Expected SARSA for each combination of hyperparameters
     for params in product(*self.param_grid.values()):
       alpha, epsilon, decay_rate, gamma = params
-      print(f"Testing params: alpha={alpha}, epsilon={epsilon}, decay_rate={decay_rate}, gamma={gamma}")
 
       success_rate = self.train_and_evaluate(
           alpha=alpha,
           epsilon=epsilon,
           decay_rate=decay_rate,
           gamma=gamma,
-          train_episodes=10000,
-          eval_episodes=1000
+          episodes=episodes,
+          eval_episodes=episodes // 10
       )
 
       self.results.append((alpha, epsilon, decay_rate, gamma, success_rate))
-      print(f"Success rate: {success_rate:.2f}%")
+      print(f"Testing params: alpha={alpha}, epsilon={epsilon}, decay_rate={decay_rate}, gamma={gamma}, Success rate: {success_rate:.2f}%")
 
   def summary(self):
     top_5 = sorted(self.results, key=lambda x: x[4], reverse=True)[:5]
@@ -87,7 +87,7 @@ class ExpectedSarsaCV:
     for alpha, epsilon, decay_rate, gamma, success_rate in top_5:
       print(f"alpha={alpha}, epsilon={epsilon}, decay_rate={decay_rate}, gamma={gamma}, success_rate={success_rate:.2f}%")
 
-  def train_and_evaluate(self, alpha, epsilon, decay_rate, gamma, train_episodes, eval_episodes):
+  def train_and_evaluate(self, alpha, epsilon, decay_rate, gamma, episodes, eval_episodes):
     expected_sarsa = ExpectedSarsa(
         self.state_space_size,
         self.action_space_size,
@@ -98,7 +98,7 @@ class ExpectedSarsaCV:
     )
 
     # Train the agent
-    for episode in range(train_episodes):
+    for episode in range(episodes):
       expected_sarsa.decay_epsilon()
       state, _ = self.env.reset()
       done = False
@@ -129,16 +129,12 @@ class ExpectedSarsaCV:
 
 
 if __name__ == "__main__":
-
-  from itertools import product
-  import numpy as np
-  from Environments.RandomWalk import make_random_walk
+  from Environments.RandomWalk import make_random_walk, estimate_goal_probability
   from Environments.FrozenLake import make_frozen_lake
 
-  env = make_random_walk(n_states=19, p_stay=0.0, p_backward=0.5, max_blocks=50)
-  env = make_frozen_lake()
+  env = make_frozen_lake()  # alpha=0.01, epsilon=0.5, decay_rate=0.5, gamma=0.01
+  env = make_random_walk()  # alpha=0.01, epsilon=2.0, decay_rate=0.99, gamma=0.95
 
-  # Define hyperparameter grid
   param_grid = {
       "alpha": [0.01, 0.05, 0.1, 0.5, 0.9, 0.99, 1.0],
       "epsilon": [2.0, 1.0, 0.5, 0.1, 0.01, 0.001, 0.005, 0.0001],
@@ -148,4 +144,6 @@ if __name__ == "__main__":
 
   cv = ExpectedSarsaCV(env, param_grid)
   cv.search()
+
+  estimate_goal_probability(env)
   cv.summary()
