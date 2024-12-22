@@ -18,32 +18,45 @@ from gymnasium.envs.toy_text.utils import categorical_sample
 WEST, EAST = 0, 1
 
 
-def make_random_walk(n_states=19, p_stay=0.1, p_backward=0.4, max_blocks=50, render_mode=None, verbose=0):
+def make_random_walk(n_states=19, p_stay=0.1, p_backward=0.4, max_blocks=40, render_mode=None, verbose=0):
   return WalkEnv(n_states=n_states, p_stay=p_stay, p_backward=p_backward, max_blocks=max_blocks, render_mode=render_mode, verbose=verbose)
 
 
 class WalkEnv(gym.Env):
+  """
+  Random Walk Environment for Reinforcement Learning.
+
+  The environment represents a 1D grid with a start state, terminal states at both ends,
+  and intermediate navigable states. The agent can move left, right, or stay in the same position.
+  Rewards are provided for reaching the terminal states.
+
+  Parameters:
+  - n_states (int): Number of intermediate states (excluding start and terminal states).
+  - p_stay (float): Probability of staying in the same state.
+  - p_backward (float): Probability of moving backward.
+  - max_blocks (int): Maximum number of steps allowed per episode.
+  - render_mode (str): Rendering mode ("human", "ansi", or None).
+  - verbose (int): Verbosity level for logging messages (0 for no logging).
+  """
+
   metadata = {"render_modes": [None, "human", "ansi"], "render_fps": 5}
 
   def __init__(self, n_states=7, p_stay=0.0, p_backward=0.5, max_blocks=100, render_mode=None, verbose=0):
     # Set the verbosity level for logging messages; higher values may provide more detailed output.
     self.verbose = verbose
 
-    # Specify the number of states in the environment, representing the discrete positions the agent can occupy.
+    # Specify the number of intermediate states in the environment.
     self.n_states = n_states
 
-    # Define the number of possible actions the agent can take.
-    # For this environment:
-    # - 0 corresponds to moving backward.
-    # - 1 corresponds to moving forward.
+    # Define the number of possible actions:
+    # - 0 corresponds to moving backward (WEST).
+    # - 1 corresponds to moving forward (EAST).
     self.n_actions = 2
 
-    # Define the shape of the environment grid, which includes:
-    # - The n_states representing the navigable positions.
-    # - Two additional boundary states, one at each end of the grid, making the grid size n_states + 2.
+    # Define the grid shape, which includes intermediate states and terminal states.
+    # The grid size is (1, n_states + 2), accounting for the start and terminal states.
     self.shape = (1, n_states + 2)
 
-    # Determine the starting state index.
     # The agent starts at the center of the grid.
     self.start_state_index = self.shape[1] // 2
 
@@ -61,173 +74,198 @@ class WalkEnv(gym.Env):
     self.nrow, self.ncol = self.shape
 
     # Define the action space as a discrete space with n_actions possible actions.
-    # This informs reinforcement learning agents of the valid action set.
     self.action_space = spaces.Discrete(self.n_actions)
 
     # Define the observation space as a discrete space representing all possible grid positions.
-    # The total number of positions is given by the product of the grid's dimensions (nrow × ncol).
     self.observation_space = spaces.Discrete(np.prod(self.shape))
 
-    # Initialize the environment specification (env.spec) as None.
-    # This is typically populated when creating an environment using gymnasium.make().
-    self.spec = None
-
-    # Create a placeholder for the environment's random number generator (RNG).
-    # This RNG will be initialized later during the reset process with a specified or random seed.
-    self.np_random = None
-
+    # Rendering settings
     self.render_mode = render_mode
+    self._pygame_initialized = False
+
     if render_mode == "human":
-      pygame.init()
-      self._pygame_initialized = True
-      self.screen_size = (800, 200)
-      self.cell_width = self.screen_size[0] // (self.shape[1] - 2)
-      self.screen = pygame.display.set_mode(self.screen_size)
-      pygame.display.set_caption("Random Walk")
-      self.clock = pygame.time.Clock()
-      self.screen.fill((0, 0, 0))
-      pygame.display.flip()
+      self._initialize_pygame()
 
-    self.nS = nS = np.prod(self.shape)
-    self.nA = nA = 2
+    # State and action counts
+    self.nS = np.prod(self.shape)
+    self.nA = self.n_actions
 
-    self.P = {}
-    for s in range(nS):
-      self.P[s] = {}
-      for a in range(nA):
-        p_forward = 1.0 - p_stay - p_backward
+    # Initialize transitions and sampling cache lazily
+    self.P = None
+    self.cached_samples = None
 
-        # Ensure state transitions stay within bounds
-        s_forward = np.clip(s - 1 if a == WEST else s + 1, 0, nS - 1)
-        s_backward = np.clip(s + 1 if a == WEST else s - 1, 0, nS - 1)
-
-        # Rewards for transitions
-        r_forward = 1.0 if s == nS - 2 and s_forward == nS - 1 else 0.0
-        r_backward = 1.0 if s == nS - 2 and s_backward == nS - 1 else 0.0
-
-        # Termination checks
-        d_forward = (s >= nS - 2 and s_forward == nS - 1) or (s <= 1 and s_forward == 0)
-        d_backward = (s >= nS - 2 and s_backward == nS - 1) or (s <= 1 and s_backward == 0)
-
-        # Transition probabilities
-        self.P[s][a] = [
-            (p_forward, s_forward, r_forward, d_forward),
-            (p_stay, s, 0.0, s in [0, nS - 1]),
-            (p_backward, s_backward, r_backward, d_backward),
-        ]
-
-        # Validate probabilities sum to 1.0
-        assert np.isclose(p_forward + p_stay + p_backward, 1.0), \
-            f"Probabilities do not sum to 1.0 for state {s}, action {a}"
-
-    self.isd = np.zeros(nS)
+    # Define the initial state distribution (starting at the center).
+    self.isd = np.zeros(self.nS)
     self.isd[self.start_state_index] = 1.0
+
+    # Set the transition probabilities for the environment.
+    self.p_stay = p_stay
+    self.p_backward = p_backward
+
+    # Placeholder for the last action taken by the agent.
     self.lastaction = None
 
-    self.action_space = spaces.Discrete(self.nA)
-    self.observation_space = spaces.Discrete(self.nS)
-
+    # Reset the environment to the initial state.
     self.reset()
 
+  def _initialize_pygame(self):
+    """
+    Initialize Pygame for rendering the environment in human mode.
+    """
+    pygame.init()
+    self._pygame_initialized = True
+    self.screen_size = (800, 200)
+    self.cell_width = self.screen_size[0] // (self.shape[1] - 2)
+    self.screen = pygame.display.set_mode(self.screen_size)
+    pygame.display.set_caption("Random Walk")
+    self.clock = pygame.time.Clock()
+    self.screen.fill((0, 0, 0))
+    pygame.display.flip()
+
+  def _initialize_transitions(self):
+    """
+    Precompute transition probabilities for all states and actions.
+    This method is called lazily to reduce initialization overhead.
+    """
+    self.P = {}
+    for s in range(self.nS):
+      self.P[s] = {}
+      for a in range(self.nA):
+        p_forward = 1.0 - self.p_stay - self.p_backward
+        s_forward = np.clip(s - 1 if a == WEST else s + 1, 0, self.nS - 1)
+        s_backward = np.clip(s + 1 if a == WEST else s - 1, 0, self.nS - 1)
+        r_forward = 1.0 if s == self.nS - 2 and s_forward == self.nS - 1 else 0.0
+        r_backward = 1.0 if s == self.nS - 2 and s_backward == self.nS - 1 else 0.0
+        d_forward = (s >= self.nS - 2 and s_forward == self.nS - 1) or (s <= 1 and s_forward == 0)
+        d_backward = (s >= self.nS - 2 and s_backward == self.nS - 1) or (s <= 1 and s_backward == 0)
+
+        self.P[s][a] = [
+            (p_forward, s_forward, r_forward, d_forward),
+            (self.p_stay, s, 0.0, s in [0, self.nS - 1]),
+            (self.p_backward, s_backward, r_backward, d_backward),
+        ]
+
+  def _initialize_categorical_samples(self):
+    """
+    Precompute cumulative probabilities for transitions to speed up sampling during steps.
+    """
+    if not self.P:
+      self._initialize_transitions()
+
+    self.cached_samples = {}
+    for s in range(self.nS):
+      for a in range(self.nA):
+        probs = [t[0] for t in self.P[s][a]]
+        self.cached_samples[(s, a)] = np.cumsum(probs)
+
   def step(self, action):
-    # Increment step counter
+    """
+    Execute a step in the environment based on the provided action.
+
+    Returns:
+    - next_state (int): The next state of the agent.
+    - reward (float): The reward received after taking the action.
+    - terminated (bool): Whether the episode has terminated.
+    - truncated (bool): Whether the episode was truncated due to max steps.
+    - info (dict): Additional information about the step.
+    """
     self.current_step += 1
 
-    # Ensure not a nan action (existing logic)
-    if np.isnan(action):
+    if not self.action_space.contains(action):
       return self.s, 0.0, True, True, {"success": False}
 
-    action = round(action)
+    if not self.cached_samples:
+      self._initialize_categorical_samples()
 
-    if not self.action_space.contains(action):
-      return self.s, 0.0, True, True, {}
-
+    cumulative_probs = self.cached_samples[(self.s, action)]
     transitions = self.P[self.s][action]
-    i = categorical_sample([t[0] for t in transitions], self.np_random)
-    p, s, reward, terminated = transitions[i]
-    self.s = s
-    self.lastaction = action
+    i = np.searchsorted(cumulative_probs, self.np_random.uniform(0, 1))
+    prob, next_state, reward, terminated = transitions[i]
 
-    # Check if maximum steps have been reached
-    truncated = self.max_blocks is not None and self.current_step >= self.max_blocks
+    self.s = next_state
+    self.lastaction = action
+    truncated = self.current_step >= self.max_blocks
     terminated = terminated or truncated
 
-    info = {"prob": p}
-    if terminated and (self.s in [0, self.nS - 1]):
-      info["success"] = True
-    else:
-      info["success"] = False
-
-    return int(s), reward, terminated, truncated, info
+    info = {"prob": prob, "success": terminated and self.s in [0, self.nS - 1]}
+    return int(next_state), reward, terminated, truncated, info
 
   def reset(self, *, seed: Optional[int] = None, options: Optional[dict] = None):
-    super().reset(seed=seed)
+    """
+    Reset the environment to its initial state.
+
+    Parameters:
+    - seed (int, optional): Random seed for reproducibility.
+    - options (dict, optional): Additional options for the reset.
+
+    Returns:
+    - initial_state (int): The initial state of the environment.
+    - info (dict): Additional information about the reset.
+    """
+    if seed is not None:
+      super().reset(seed=seed)
+      self.np_random, _ = gym.utils.seeding.np_random(seed)
+
     self.s = int(categorical_sample(self.isd, self.np_random))
     self.lastaction = None
-    self.current_step = 0  # Reset step counter
+    self.current_step = 0
     return int(self.s), {"prob": self.isd[self.s]}
 
   def render(self):
-    mode = self.render_mode
-    if mode is None:
-      return
+    if self.render_mode == "ansi":
+      return self._ansi_render()
+    elif self.render_mode == "human":
+      self._human_render()
 
-    if mode == "ansi":
-      outfile = StringIO() if mode == "ansi" else sys.stdout
-      desc = np.asarray(["[" + ascii_uppercase[: self.shape[1] - 2] + "]"], dtype="c").tolist()
-      desc = [[c.decode("utf-8") for c in line] for line in desc]
-      color = "red" if self.s == 0 else "green" if self.s == self.nS - 1 else "yellow"
-      desc[0][self.s] = utils.colorize(desc[0][self.s], color, highlight=True)
-      outfile.write("\n")
-      outfile.write("\n".join("".join(line) for line in desc) + "\n")
-      return outfile.getvalue()
+  def _ansi_render(self):
+    """
+    Render the environment in text mode.
+    """
+    outfile = StringIO()
+    desc = np.asarray(["[" + ascii_uppercase[: self.shape[1] - 2] + "]"], dtype="c").tolist()
+    desc = [[c.decode("utf-8") for c in line] for line in desc]
+    color = "red" if self.s == 0 else "green" if self.s == self.nS - 1 else "yellow"
+    desc[0][self.s] = utils.colorize(desc[0][self.s], color, highlight=True)
+    outfile.write("\n")
+    outfile.write("\n".join("".join(line) for line in desc) + "\n")
+    return outfile.getvalue()
 
-    if mode == "human":
-      self.human()
-
-  def human(self):
+  def _human_render(self):
+    """
+    Render the environment using Pygame.
+    """
     if self.verbose > 0:
       print("Rendering the environment with Pygame...")
 
-    # Colors
-    BG_COLOR = (30, 30, 30)  # Background color
-    CELL_COLOR = (200, 200, 200)  # Default cell color
-    AGENT_COLOR = (255, 255, 0)  # Yellow for agent
-    TERMINAL_COLOR = (0, 255, 0)  # Green for terminal states
-    LEFT_TERMINAL_COLOR = (255, 0, 0)  # Red for left terminal state
+    BG_COLOR = (30, 30, 30)
+    TERMINAL_COLOR = (0, 255, 0)
+    LEFT_TERMINAL_COLOR = (255, 0, 0)
+    AGENT_COLOR = (255, 255, 0)
+    CELL_COLOR = (200, 200, 200)
 
-    # Pump Pygame events to keep the event queue alive
     pygame.event.pump()
-
-    # Clear the screen
     self.screen.fill(BG_COLOR)
 
-    # Draw the grid
+    surface = pygame.Surface(self.screen_size)
     for i in range(self.shape[1] - 2):
       cell_x = i * self.cell_width
       cell_rect = pygame.Rect(cell_x, 50, self.cell_width, 100)
+      color = (
+          LEFT_TERMINAL_COLOR if i == 0 else
+          TERMINAL_COLOR if i == self.nS - 1 else
+          AGENT_COLOR if i == self.s else
+          CELL_COLOR
+      )
+      pygame.draw.rect(surface, color, cell_rect)
+      pygame.draw.rect(surface, (0, 0, 0), cell_rect, 2)
 
-      if i == 0:    # Left terminal state
-        pygame.draw.rect(self.screen, LEFT_TERMINAL_COLOR, cell_rect)
-      elif i == self.nS - 1:    # Right terminal state
-        pygame.draw.rect(self.screen, TERMINAL_COLOR, cell_rect)
-      elif i == self.s:    # Agent position
-        pygame.draw.rect(self.screen, AGENT_COLOR, cell_rect)
-      else:
-        pygame.draw.rect(self.screen, CELL_COLOR, cell_rect)
-
-      # Draw the border
-      pygame.draw.rect(self.screen, (0, 0, 0), cell_rect, 2)
-
-    # Refresh display
+    self.screen.blit(surface, (0, 0))
     pygame.display.flip()
-
-    # Maintain frame rate
     self.clock.tick(self.metadata["render_fps"])
 
 
 def plot_transition_matrix(env):
-    # Adjust for terminal states
+  # Adjust for terminal states
   n_states = env.shape[1] - 2  # Exclude start and terminal states
   n_actions = env.n_actions
   transition_probs = np.zeros((n_states, n_actions, n_states))

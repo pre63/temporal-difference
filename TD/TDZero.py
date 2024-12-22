@@ -1,7 +1,7 @@
 
 import numpy as np
 import matplotlib.pyplot as plt
-
+from matplotlib.gridspec import GridSpec
 from multiprocessing import Pool, get_context
 from itertools import product
 
@@ -21,7 +21,19 @@ class TDZero:
     self.state_space_size = nrow * ncol
     self.value_table = np.full(self.state_space_size, -np.inf)  # Initialize all states to a very low value
 
-    self.policy = self.random_policy if policy is None else policy
+    self.policy = self.egreey_policy if policy is None else policy
+
+  def reset(self):
+    self.decay_epsilon()
+
+  def decay_epsilon(self):
+    self.epsilon = max(self.epsilon * self.decay_rate, 0.01)
+
+  def egreey_policy(self, state):
+    if np.random.rand() < self.epsilon:
+      return self.action_space.sample()
+    else:
+      return self.predict(state)
 
   def random_policy(self, state):
     return self.action_space.sample()
@@ -107,6 +119,27 @@ class TDZeroCV:
           [(params, episodes, samples) for params in param_combinations]
       )
 
+  def _evaluate_model(self, model, trials=100):
+    success, rewards = 0, 0
+
+    for _ in range(trials):
+      state, _ = self.env.reset()
+      done = False
+
+      while not done:
+        action = model.predict(state)
+        next_state, reward, terminated, truncated, info = self.env.step(action)
+        done = terminated or truncated
+        state = next_state
+
+      rewards += reward
+      success += 1 if info.get("success", False) else 0
+
+    avg_success = (success / trials) * 100
+    avg_rewards = rewards / trials
+
+    return avg_success, avg_rewards
+
   def _evaluate_params(self, args):
     params, episodes, samples = args
     all_data = []
@@ -116,8 +149,7 @@ class TDZeroCV:
       sample_data = self._train_and_collect_data(model, episodes)
       all_data.append(sample_data)
 
-    avg_success = np.mean([np.mean(sample['success']) for sample in all_data])
-    avg_rewards = np.mean([np.mean(sample['rewards']) for sample in all_data])
+    avg_success, avg_rewards = self._evaluate_model(model, episodes // 10)
 
     result = {
         'params': params,
@@ -135,11 +167,12 @@ class TDZeroCV:
 
     for _ in range(episodes):
       state, _ = self.env.reset()
+      model.reset()
       episode_rewards = []
       done = False
 
       while not done:
-        action = model.predict(state)
+        action = model.policy(state)
         next_state, reward, terminated, truncated, info = self.env.step(action)
         model.update(state, reward, next_state, done)
         done = terminated or truncated
@@ -172,41 +205,53 @@ class TDZeroCV:
     for i, result in enumerate(top_5):
       print(f"Run {i + 1}: {result['params']}, Avg Success: {result['avg_success']:.2f}%, Avg Rewards: {result['avg_rewards']:.2f}")
 
-  def plot_metrics(self):
-    top_5 = sorted(self.results, key=lambda x: x['avg_success'], reverse=True)[:5]
+  def plot_metrics(self, index=None):
+    if index is not None:
+      if index < 0 or index >= len(self.results):
+        print(f"Invalid index: {index}. Please provide a valid index.")
+        return
+      result = self.results[index]
+    else:
+      top_5 = sorted(self.results, key=lambda x: x['avg_success'], reverse=True)[:5]
+      if len(top_5) == 0:
+        print("No results to plot")
+        return
+      result = top_5[0]
 
-    for i, result in enumerate(top_5):
-      rewards = [r for sample in result['samples'] for r in sample['rewards']]
-      steps = [s for sample in result['samples'] for s in sample['steps']]
+    samples = result['samples']
 
-      plt.figure(figsize=(12, 8))
-      gs = GridSpec(2, 2)
+    plt.figure(figsize=(12, 8))
+    gs = GridSpec(2, 2)
 
-      # Plot rewards per episode
-      ax1 = plt.subplot(gs[0, 0])
-      ax1.plot(rewards)
-      ax1.set_title(f"Rewards per Episode - Top {i + 1}")
-      ax1.set_xlabel("Episode")
-      ax1.set_ylabel("Total Rewards")
+    # Plot rewards per episode for all samples
+    ax1 = plt.subplot(gs[0, 0])
+    for j, sample in enumerate(samples):
+      ax1.plot(sample['rewards'], label=f"Sample {j + 1}")
+    ax1.set_title(f"Rewards per Episode")
+    ax1.set_xlabel("Episode")
+    ax1.set_ylabel("Total Rewards")
+    ax1.legend()
 
-      # Plot steps per episode
-      ax2 = plt.subplot(gs[0, 1])
-      ax2.plot(steps)
-      ax2.set_title(f"Steps per Episode - Top {i + 1}")
-      ax2.set_xlabel("Episode")
-      ax2.set_ylabel("Steps")
+    # Plot steps per episode for all samples
+    ax2 = plt.subplot(gs[0, 1])
+    for j, sample in enumerate(samples):
+      ax2.plot(sample['steps'], label=f"Sample {j + 1}")
+    ax2.set_title(f"Steps per Episode")
+    ax2.set_xlabel("Episode")
+    ax2.set_ylabel("Steps")
+    ax2.legend()
 
-      # Plot value function
-      ax3 = plt.subplot(gs[1, :])
-      value_func = result['samples'][0]['value_function']
-      im = ax3.imshow(value_func, cmap="viridis", interpolation="nearest")
-      plt.colorbar(im, ax=ax3)
-      ax3.set_title(f"Value Function - Top {i + 1}")
-      ax3.set_xlabel("Grid Column")
-      ax3.set_ylabel("Grid Row")
+    # Plot value function for all samples as a line plot
+    ax3 = plt.subplot(gs[1, :])
+    for j, sample in enumerate(samples):
+      ax3.plot(sample['value_function'], label=f"Sample {j + 1}")
+    ax3.set_title(f"Value Function")
+    ax3.set_xlabel("State Index")
+    ax3.set_ylabel("Predicted Value")
+    ax3.legend()
 
-      plt.tight_layout()
-      plt.show()
+    plt.tight_layout()
+    plt.show()
 
 
 if __name__ == "__main__":
@@ -219,6 +264,10 @@ if __name__ == "__main__":
   param_grid = {
       "alpha": np.linspace(0.0001, 1.0, 50),
       "gamma": np.linspace(0.0001, 1.0, 50),
+  }
+  param_grid = {
+      "alpha": [0.002],
+      "gamma": [0.001],
   }
 
   cv = TDZeroCV(env, param_grid)

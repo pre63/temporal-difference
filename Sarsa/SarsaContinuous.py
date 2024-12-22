@@ -1,5 +1,5 @@
 import numpy as np
-from algorithms.IHT import IHT, tiles
+from Sarsa.IHT import IHT, tiles
 
 
 class SarsaContinuous:

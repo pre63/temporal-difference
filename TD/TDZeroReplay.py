@@ -2,7 +2,7 @@
 import numpy as np
 
 
-from algorithms.TDZero import TDZero, TDZeroCV
+from TD.TDZero import TDZero, TDZeroCV
 
 epsilon = 1e-10
 
@@ -12,6 +12,10 @@ class TDZeroReplay(TDZero):
     super().__init__(**kwargs)
     state_space_size = self.state_space_size
     self.eligibility_matrix = np.identity(state_space_size)
+
+  def reset(self):
+    super().reset()
+    self.eligibility_matrix = np.identity(self.state_space_size)
 
   def update(self, state, reward, next_state, done):
     # Handle initialization for the first visit

@@ -117,7 +117,6 @@ if __name__ == "__main__":
 
   for params in product(*param_grid.values()):
     alpha, epsilon, decay_rate, gamma = params
-    print(f"Testing params: alpha={alpha}, epsilon={epsilon}, decay_rate={decay_rate}, gamma={gamma}")
 
     success_rate = sarsa_cv.train_and_evaluate(
         alpha, epsilon, decay_rate, gamma,
@@ -125,7 +124,7 @@ if __name__ == "__main__":
     )
 
     results.append((alpha, epsilon, decay_rate, gamma, success_rate))
-    print(f"Success rate: {success_rate:.2f}%")
+    print(f"Testing params: alpha={alpha}, epsilon={epsilon}, decay_rate={decay_rate}, gamma={gamma}, Success rate: {success_rate:.2f}%")
 
     if success_rate > best_success_rate:
       best_success_rate = success_rate
