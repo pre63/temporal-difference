@@ -2,7 +2,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
-from multiprocessing import Pool
+from multiprocessing import Pool, get_context
 from itertools import product
 
 
@@ -100,7 +100,8 @@ class TDZeroCV:
         for values in product(*self.param_grid.values())
     ]
 
-    with Pool() as pool:
+    # Use 'spawn' to avoid print suppression
+    with get_context("spawn").Pool() as pool:
       self.results = pool.map(
           self._evaluate_params,
           [(params, episodes, samples) for params in param_combinations]
@@ -108,62 +109,51 @@ class TDZeroCV:
 
   def _evaluate_params(self, args):
     params, episodes, samples = args
-    success_rates = []
+    all_data = []
 
     for _ in range(samples):
       model = self.new(**params)
-      success_rate, rewards, steps, value_func = self.train_and_evaluate(model, episodes)
-      success_rates.append(success_rate)
+      sample_data = self._train_and_collect_data(model, episodes)
+      all_data.append(sample_data)
 
-      self.episode_rewards.append(rewards)
-      self.episode_steps.append(steps)
-      self.value_function.append(value_func)
+    avg_success = np.mean([np.mean(sample['success']) for sample in all_data])
+    avg_rewards = np.mean([np.mean(sample['rewards']) for sample in all_data])
 
-    avg_success_rate = np.mean(success_rates)
-    alpha, gamma = params["alpha"], params["gamma"]
-    print(f"Alpha: {alpha:.4f}, Gamma: {gamma:.4f}, Average Success: {avg_success_rate:.2f}%")
+    result = {
+        'params': params,
+        'avg_success': avg_success,
+        'avg_rewards': avg_rewards,
+        'samples': all_data
+    }
 
-    return params, avg_success_rate
+    print(f"Alpha: {params['alpha']:.4f}, Gamma: {params['gamma']:.4f}, Avg Success: {avg_success:.2f}%, Avg Rewards: {avg_rewards:.2f}")
 
-  def train_and_evaluate(self, model, episodes):
-    rewards = []
-    steps = []
+    return result
+
+  def _train_and_collect_data(self, model, episodes):
+    rewards, steps, success = [], [], []
+
     for _ in range(episodes):
       state, _ = self.env.reset()
-      total_reward = 0
-      step_count = 0
-      done = False
-
-      while not done:
-        action = self.env.action_space.sample()
-        next_state, reward, terminated, truncated, info = self.env.step(action)
-        done = terminated or truncated
-        model.update(state, reward, next_state, done)
-        state = next_state
-        total_reward += reward
-        step_count += 1
-
-      rewards.append(total_reward)
-      steps.append(step_count)
-
-    # Generate value function using the model's prediction across the state space
-    value_func = self._generate_value_function(model)
-
-    success = []
-    for _ in range(episodes // 10):
-      state, _ = self.env.reset()
+      episode_rewards = []
       done = False
 
       while not done:
         action = model.predict(state)
         next_state, reward, terminated, truncated, info = self.env.step(action)
+        model.update(state, reward, next_state, done)
         done = terminated or truncated
+
+        episode_rewards.append(reward)
         state = next_state
 
-      success.append(1 if info["success"] else 0)
+      rewards.append(sum(episode_rewards))
+      steps.append(len(episode_rewards))
+      success.append(0 if info.get("success", False) else 1)
 
-    success_rate = np.mean(success) * 100
-    return success_rate, rewards, steps, value_func
+    value_function = self._generate_value_function(model)
+
+    return {'rewards': rewards, 'steps': steps, 'success': success, 'value_function': value_function}
 
   def _generate_value_function(self, model):
     """Generate the value function for visualization using the model's prediction."""
@@ -177,38 +167,41 @@ class TDZeroCV:
     return value_func
 
   def summary(self):
-    top_5 = sorted(self.results, key=lambda x: x[1], reverse=True)[:5]
-    print("Top 5 results:")
-    for i, (params, success_rate) in enumerate(top_5):
-      rewards_per_ep = np.mean(self.episode_rewards[i])
-      steps_per_ep = np.mean(self.episode_steps[i])
-      print(f"Run {i + 1}: params={params}, success_rate={success_rate:.2f}%, "
-            f"avg_rewards_per_episode={rewards_per_ep:.2f}, avg_steps_per_episode={steps_per_ep:.2f}")
+    top_5 = sorted(self.results, key=lambda x: x['avg_success'], reverse=True)[:5]
+    print("Top 5 Results:")
+    for i, result in enumerate(top_5):
+      print(f"Run {i + 1}: {result['params']}, Avg Success: {result['avg_success']:.2f}%, Avg Rewards: {result['avg_rewards']:.2f}")
 
   def plot_metrics(self):
-    for i, (rewards, steps, value_func) in enumerate(zip(self.episode_rewards, self.episode_steps, self.value_function)):
-      fig = plt.figure(figsize=(16, 8))
-      gs = GridSpec(2, 2, figure=fig)
+    top_5 = sorted(self.results, key=lambda x: x['avg_success'], reverse=True)[:5]
+
+    for i, result in enumerate(top_5):
+      rewards = [r for sample in result['samples'] for r in sample['rewards']]
+      steps = [s for sample in result['samples'] for s in sample['steps']]
+
+      plt.figure(figsize=(12, 8))
+      gs = GridSpec(2, 2)
 
       # Plot rewards per episode
-      ax1 = fig.add_subplot(gs[0, 0])
+      ax1 = plt.subplot(gs[0, 0])
       ax1.plot(rewards)
-      ax1.set_title(f"Rewards per Episode - Run {i + 1}")
+      ax1.set_title(f"Rewards per Episode - Top {i + 1}")
       ax1.set_xlabel("Episode")
-      ax1.set_ylabel("Total Reward")
+      ax1.set_ylabel("Total Rewards")
 
       # Plot steps per episode
-      ax2 = fig.add_subplot(gs[0, 1])
+      ax2 = plt.subplot(gs[0, 1])
       ax2.plot(steps)
-      ax2.set_title(f"Steps per Episode - Run {i + 1}")
+      ax2.set_title(f"Steps per Episode - Top {i + 1}")
       ax2.set_xlabel("Episode")
       ax2.set_ylabel("Steps")
 
       # Plot value function
-      ax3 = fig.add_subplot(gs[1, :])
+      ax3 = plt.subplot(gs[1, :])
+      value_func = result['samples'][0]['value_function']
       im = ax3.imshow(value_func, cmap="viridis", interpolation="nearest")
-      fig.colorbar(im, ax=ax3)
-      ax3.set_title(f"Value Function - Run {i + 1}")
+      plt.colorbar(im, ax=ax3)
+      ax3.set_title(f"Value Function - Top {i + 1}")
       ax3.set_xlabel("Grid Column")
       ax3.set_ylabel("Grid Row")
 
