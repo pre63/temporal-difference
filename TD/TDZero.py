@@ -30,38 +30,30 @@ class TDZero:
     self.value_table[self.value_table == 0] = -np.inf
 
     if self.action_space.n == 2:
-      left, right = state - 1, state + 1
-
-      if state == 0:
-        adjacent_states = self.value_table[right]
-      if state == self.state_space_size - 1:
-        adjacent_states = self.value_table[left]
-      if state > 0 and state < self.state_space_size - 1:
-        adjacent_states = self.value_table[[left, right]]
-
-      best_action = np.argmax(adjacent_states)
+      adjacent_indices = [state - 1, state + 1]
+      adjacent_states = [self.value_table[idx] for idx in adjacent_indices if 0 <= idx < self.state_space_size]
+      best_action = np.argmax(adjacent_states) if adjacent_states else -1
       return int(best_action)
 
     if self.action_space.n == 4:
-      # 0: Move left
-      # 1: Move down
-      # 2: Move right
-      # 3: Move up
-      left, down, right, up = state - 1, state + self.ncol, state + 1, state - self.ncol
+      adjacent_indices = [
+          state - 1,              # Left
+          state + self.ncol,      # Down
+          state + 1,              # Right
+          state - self.ncol       # Up
+      ]
 
-      if state % self.ncol == 0:
-        adjacent_states = self.value_table[[down, right, up]]
-      if state % self.ncol == self.ncol - 1:
-        adjacent_states = self.value_table[[left, down, up]]
-      if state < self.ncol:
-        adjacent_states = self.value_table[[left, down, right]]
-      if state >= self.nrow * (self.ncol - 1):
-        adjacent_states = self.value_table[[left, right, up]]
-      if state % self.ncol != 0 and state % self.ncol != self.ncol - 1 and state >= self.ncol and state < self.nrow * (self.ncol - 1):
-        adjacent_states = self.value_table[[left, down, right, up]]
+      # Exclude out-of-bound indices
+      adjacent_states = []
+      for i, idx in enumerate(adjacent_indices):
+        if 0 <= idx < self.state_space_size:
+          if (i == 0 and state % self.ncol != 0) or (i == 2 and state % self.ncol != self.ncol - 1) or (i in [1, 3]):
+            adjacent_states.append(self.value_table[idx])
+          else:
+            adjacent_states.append(-np.inf)  # Invalid direction due to grid edges
 
-      best_index = np.argmax(adjacent_states)
-      best_action = [0, 1, 2, 3][best_index]
+      best_index = np.argmax(adjacent_states) if adjacent_states else -1
+      best_action = [0, 1, 2, 3][best_index] if best_index >= 0 else -1
 
       return int(best_action)
 
@@ -108,7 +100,7 @@ class TDZeroCV:
         for values in product(*self.param_grid.values())
     ]
 
-    with Pool(16) as pool:
+    with Pool() as pool:
       self.results = pool.map(
           self._evaluate_params,
           [(params, episodes, samples) for params in param_combinations]
@@ -176,9 +168,12 @@ class TDZeroCV:
   def _generate_value_function(self, model):
     """Generate the value function for visualization using the model's prediction."""
     value_func = []
-    for state in range(self.env.observation_space.n):
+    for state in range(self.env.observation_space.start, self.env.observation_space.n):
       value = model.predict(state)
-      value_func.append(value)
+      if self.env.observation_space.contains(value):
+        value_func.append(value)
+      else:
+        value_func.append(None)  # Handle out-of-bounds predictions
     return value_func
 
   def summary(self):
@@ -225,8 +220,8 @@ if __name__ == "__main__":
   from Environments.RandomWalk import make_random_walk, estimate_goal_probability
   from Environments.FrozenLake import make_frozen_lake
 
-  env = make_frozen_lake()  # Best results: alpha=0.003, gamma=0.2
   env = make_random_walk()  # Best results: alpha=0.003, gamma=0.7
+  env = make_frozen_lake()  # Best results: alpha=0.003, gamma=0.2
 
   param_grid = {
       "alpha": np.linspace(0.0001, 1.0, 50),
@@ -238,3 +233,4 @@ if __name__ == "__main__":
 
   estimate_goal_probability(env)
   cv.summary()
+  cv.plot_metrics()
