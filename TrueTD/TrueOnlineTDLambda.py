@@ -1,8 +1,11 @@
 import numpy as np
+from TD.TDZero import TDZero, TDZeroCV
 
 
-class TrueOnlineTDLambda:
-  def __init__(self, num_features, alpha, gamma, lambd):
+class TrueOnlineTDLambda(TDZero):
+  def __init__(self, action_space, observation_space, nrow, ncol, alpha, gamma, lambd, **kwargs):
+    super().__init__(action_space, observation_space, nrow, ncol, **kwargs)
+    num_features = observation_space.n
     self.num_features = num_features
     self.alpha = alpha  # Step size
     self.gamma = gamma  # Discount factor
@@ -11,7 +14,7 @@ class TrueOnlineTDLambda:
     self.e = np.zeros(num_features)  # Eligibility trace
     self.v_old = 0  # Previous value estimate
 
-  def update(self, phi, reward, phi_next, terminal):
+  def update(self, phi, action, reward, phi_next, next_action, terminal):
     """
     Perform an update for a single time step.
 
@@ -20,6 +23,9 @@ class TrueOnlineTDLambda:
     :param phi_next: Next feature vector.
     :param terminal: Whether the next state is terminal.
     """
+    phi = phi / (np.linalg.norm(phi) + 1e-10)  # Normalize phi to prevent large values
+    phi_next = phi_next / (np.linalg.norm(phi_next) + 1e-10)  # Normalize phi_next to prevent large values
+
     v = np.dot(self.theta, phi)  # Current value estimate
     v_next = 0 if terminal else np.dot(self.theta, phi_next)  # Next value estimate
 
@@ -33,14 +39,45 @@ class TrueOnlineTDLambda:
     self.theta += delta * self.e + self.alpha * (v - self.v_old) * phi
     self.v_old = v_next if not terminal else 0
 
-  def predict(self, phi):
+  def predict(self, state):
     """
-    Get the estimated value for a state.
+    Predict the best action based on the current state using theta.
 
-    :param phi: Feature vector of the state.
-    :return: Estimated value.
+    Parameters:
+    - state (int): The current state index.
+
+    Returns:
+    - best_action (int): The best action to take based on predicted values.
     """
-    return np.dot(self.theta, phi)
+    if self.action_space.n == 2:
+      # For two actions (e.g., WEST and EAST)
+      adjacent_indices = [state - 1, state + 1]
+      adjacent_states = [
+          self.theta[idx] if 0 <= idx < self.state_space_size else -np.inf
+          for idx in adjacent_indices
+      ]
+      best_action = int(np.argmax(adjacent_states))
+      return best_action
+
+    elif self.action_space.n == 4:
+      # For four actions (e.g., UP, DOWN, LEFT, RIGHT)
+      adjacent_indices = [
+          state - 1,              # Left
+          state + self.ncol,      # Down
+          state + 1,              # Right
+          state - self.ncol       # Up
+      ]
+
+      adjacent_states = []
+      for i, idx in enumerate(adjacent_indices):
+        if 0 <= idx < self.state_space_size:
+          # Validate movement within grid boundaries
+          if (i == 0 and state % self.ncol != 0) or (i == 2 and state % self.ncol != self.ncol - 1) or (i in [1, 3]):
+            adjacent_states.append(self.theta[idx])
+
+      best_index = int(np.argmax(adjacent_states))
+      action = [0, 1, 2, 3][best_index]
+      return action
 
   def reset(self):
     """
@@ -50,95 +87,33 @@ class TrueOnlineTDLambda:
     self.v_old = 0
 
 
-class TrueOnlineTDLambdaReplay:
-  def __init__(self, alpha, gamma, lambd, theta_init, n_obs, n_actions, action_space, feature_func):
-    self.alpha = alpha
-    self.gamma = gamma
-    self.lambd = lambd
-    self.theta = theta_init.copy()
-    self.feature_func = feature_func
-    self.n = len(self.theta)
-    self.n_obs = n_obs
-    self.n_actions = n_actions
-    self.action_space = action_space
-
-    # Initialization of traces and auxiliary variables
-    self.e = np.zeros(self.n)  # Eligibility trace
-    self.e_bar = np.zeros(self.n)  # Auxiliary eligibility trace
-    self.A_bar = np.eye(self.n)  # Auxiliary matrix (identity matrix)
-    self.V_old = 0.0  # Previous value
-    self.phi = None
-
-    assert np.all(np.isfinite(self.theta)), "Theta contains invalid values."
-    assert np.all(np.isfinite(self.A_bar)), "A_bar contains invalid values."
-    assert np.all(np.isfinite(self.e)), "Eligibility trace contains invalid values."
-    assert np.all(np.isfinite(self.e_bar)), "Auxiliary trace contains invalid values."
-
-  def reset(self):
-    """Resets traces and auxiliary variables at the start of an episode."""
-    self.e = np.zeros(self.n)
-    self.e_bar = np.zeros(self.n)
-    self.A_bar = np.eye(self.n)
-    self.V_old = 0.0
-    self.phi = None
-
-  def reset_traces(self):
-    """Resets only the eligibility traces for within-episode updates."""
-    self.e = np.zeros(self.n)
-    self.e_bar = np.zeros(self.n)
-    self.V_old = 0.0
-    self.phi = None
-
-  def update(self, state, action, reward, next_state, next_action, done):
-    if self.phi is None:
-      self.phi = self.feature_func(state, action)
-
-    phi_next = self.feature_func(next_state, next_action) if not done else np.zeros(self.n)
-    V = np.dot(self.theta, self.phi)
-    V_next = np.dot(self.theta, phi_next)
-    delta = reward + (0 if done else self.gamma * V_next) - V
-
-    # Update eligibility trace
-    trace_cap = 10
-    self.e = np.clip(self.gamma * self.lambd * self.e + (1 - self.alpha * self.gamma * self.lambd * np.dot(self.e, self.phi)) * self.phi, -trace_cap, trace_cap)
-
-    # Update auxiliary eligibility trace
-    self.e_bar = np.clip(
-        self.e_bar + self.e * (delta + V - self.V_old) - self.alpha * self.phi * (np.dot(self.e_bar, self.phi) - self.V_old),
-        -trace_cap, trace_cap
+class TrueOnlineTDLambdaCV(TDZeroCV):
+  def new(self, **params):
+    return TrueOnlineTDLambda(
+        action_space=self.env.action_space,
+        observation_space=self.env.observation_space,
+        nrow=self.env.nrow,
+        ncol=self.env.ncol,
+        **params
     )
 
-    # Update auxiliary matrix with stabilization
-    self.A_bar = (1 - 1e-4) * self.A_bar - self.alpha * np.outer(self.phi, np.dot(self.phi, self.A_bar)) + 1e-6 * np.eye(self.n)
 
-    # Update parameter vector with regularization
-    gradient = self.A_bar @ self.theta + self.e_bar
-    gradient_norm = np.linalg.norm(gradient)
-    max_gradient_norm = 1.0
-    if gradient_norm > max_gradient_norm:
-      gradient *= max_gradient_norm / gradient_norm
+if __name__ == "__main__":
+  from Environments.RandomWalk import make_random_walk, estimate_goal_probability
+  from Environments.FrozenLake import make_frozen_lake
 
-    self.theta = self.theta - self.alpha * gradient - 1e-3 * self.theta  # Regularization
+  env = make_frozen_lake()
+  env = make_random_walk()  # Best Alpha: 0.0100, Gamma: 0.9500, Lambda: 0.9000
 
-    # Update for the next iteration
-    self.V_old = V_next
-    self.phi = None if done else phi_next
+  param_grid = {
+      "alpha": [0.01, 0.05, 0.1, 0.5],
+      "gamma": [0.9, 0.95, 0.99],
+      "lambd": [0.5, 0.7, 0.9]
+  }
 
-    return self.theta
+  cv = TrueOnlineTDLambdaCV(env, param_grid)
+  cv.search()
 
-  def predict(self, state, action):
-    features = self.feature_func(state, action)  # Compute feature representation for state
-    pred = np.dot(self.theta, features)  # Dot product for prediction
-    pred = np.clip(pred, -1e3, 1e3)  # Clip the prediction to avoid extreme values
-
-    if hasattr(self.action_space, 'low') and hasattr(self.action_space, 'high'):
-      # Continuous action space
-      action = np.clip(pred, self.action_space.low, self.action_space.high)
-    elif hasattr(self.action_space, 'n'):
-      # Discrete action space
-      action = int(np.round(pred))  # Round prediction to nearest integer
-      action = np.clip(action, 0, self.action_space.n - 1)  # Clip to valid discrete range
-    else:
-      raise ValueError("Unknown action space type")
-
-    return action
+  estimate_goal_probability(env)
+  cv.summary()
+  cv.plot_metrics()

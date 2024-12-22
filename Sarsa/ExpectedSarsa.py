@@ -22,7 +22,7 @@ class ExpectedSarsa:
     else:
       return np.argmax(self.q_table[state])  # Exploit
 
-  def update(self, state, action, reward, next_state, done):
+  def update(self, state, action, reward, next_state, next_action, done):
     current_q = self.q_table[state, action]
 
     if done:
@@ -132,15 +132,19 @@ class ExpectedSarsaCV:
       episode_steps = 0
       done = False
 
+      action = expected_sarsa.policy(state)
+
       while not done:
-        action = expected_sarsa.policy(state)
         next_state, reward, terminal, truncated, info = self.env.step(action)
         done = terminal or truncated
-        expected_sarsa.update(state, action, reward, next_state, done)
-        state = next_state
+        next_action = expected_sarsa.policy(next_state)
+        expected_sarsa.update(state, action, reward, next_state, next_action, done)
 
         episode_rewards += reward
         episode_steps += 1
+
+        action = next_action
+        state = next_state
 
       rewards.append(episode_rewards)
       steps.append(episode_steps)

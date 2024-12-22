@@ -1,8 +1,10 @@
 import numpy as np
 from itertools import product
-
+from TD.TDZero import TDZero, TDZeroCV
 
 # Scale features
+
+
 def binary_basis_features(n_obs, n_actions):
   def feature_func(state, action=None):
     if action is None:
@@ -13,12 +15,17 @@ def binary_basis_features(n_obs, n_actions):
   return feature_func
 
 
-class TrueOnlineTDLambdaReplay:
-  def __init__(self, alpha, gamma, lambd, theta_init, n_obs, n_actions, action_space, feature_func=None):
+class TrueOnlineTDLambdaReplay(TDZero):
+  def __init__(self, action_space, observation_space, nrow, ncol, alpha, gamma, lambd, feature_func=None):
+    super().__init__(action_space, observation_space, nrow, ncol, alpha=alpha, gamma=gamma, epsilon=0.0, decay_rate=1.0, policy=None)
+    n_actions = action_space.n
+    n_obs = observation_space.n
+    theta_init = np.zeros(n_obs * n_actions)
+
     self.alpha = alpha
     self.gamma = gamma
     self.lambd = lambd
-    self.theta = theta_init.copy()
+    self.theta = theta_init
     self.feature_func = feature_func if feature_func is not None else binary_basis_features(n_obs, n_actions)
     self.n = len(self.theta)
     self.n_obs = n_obs
@@ -31,6 +38,7 @@ class TrueOnlineTDLambdaReplay:
     self.A_bar = np.eye(self.n)  # Auxiliary matrix (identity matrix)
     self.V_old = 0.0  # Previous value
     self.phi = None
+    self.policy = self.greedy_policy
 
     assert np.all(np.isfinite(self.theta)), "Theta contains invalid values."
     assert np.all(np.isfinite(self.A_bar)), "A_bar contains invalid values."
@@ -89,7 +97,15 @@ class TrueOnlineTDLambdaReplay:
 
     return self.theta
 
-  def predict(self, state, action):
+  def greedy_policy(self, state):
+    action = super().predict(state)
+    self.last_action = action
+    return action
+
+  def predict(self, state, action=None):
+    if action is None:
+      action = self.last_action
+
     features = self.feature_func(state, action)  # Compute feature representation for state
     pred = np.dot(self.theta, features)  # Dot product for prediction
     pred = np.clip(pred, -1e3, 1e3)  # Clip the prediction to avoid extreme values
@@ -107,86 +123,15 @@ class TrueOnlineTDLambdaReplay:
     return action
 
 
-class TrueOnlineTDLambdaReplayCV:
-
-  def __init__(self, env, param_grid):
-    self.env = env
-    self.param_grid = param_grid
-    self.state_space_size = env.observation_space.n
-    self.action_space_size = env.action_space.n
-    self.results = []
-
-  def search(self):
-    # Train and evaluate True Online TD(lambda) for each combination of hyperparameters
-
-    print("Searching hyperparameters...")
-    print(f"Total combinations: {np.prod([len(v) for v in self.param_grid.values()])}")
-
-    for params in product(*self.param_grid.values()):
-      alpha, gamma, lambd = params
-      print(f"Training with alpha={alpha}, gamma={gamma}, lambd={lambd}...")
-
-      success_rate = self.train_and_evaluate(
-          alpha=alpha,
-          gamma=gamma,
-          lambd=lambd,
-          train_episodes=10000,
-          eval_episodes=1000
-      )
-
-      self.results.append((alpha, gamma, lambd, success_rate))
-      print(f"Success rate: {success_rate:.2f}%")
-
-  def summary(self):
-    top_5 = sorted(self.results, key=lambda x: x[3], reverse=True)[:5]
-    print("Top 5 results:")
-    for alpha, gamma, lambd, success_rate in top_5:
-      print(f"alpha={alpha}, gamma={gamma}, lambd={lambd}, success_rate={success_rate:.2f}%")
-
-  def train_and_evaluate(self, alpha, gamma, lambd, train_episodes, eval_episodes):
-    model = TrueOnlineTDLambdaReplay(
-        alpha=alpha,
-        gamma=gamma,
-        lambd=lambd,
-        theta_init=np.zeros(self.state_space_size * self.action_space_size),
-        n_obs=self.state_space_size,
-        n_actions=self.action_space_size,
+class TrueOnlineTDLambdaReplayCV(TDZeroCV):
+  def new(self, **params):
+    return TrueOnlineTDLambdaReplay(
         action_space=self.env.action_space,
-        feature_func=None
+        observation_space=self.env.observation_space,
+        nrow=self.env.nrow,
+        ncol=self.env.ncol,
+        **params
     )
-
-    # Train the agent
-    for episode in range(train_episodes):
-      model.reset_traces()
-      state, _ = self.env.reset()
-      done = False
-
-      action = env.action_space.sample()
-      while not done:
-        next_state, reward, terminal, truncated, info = self.env.step(action)
-        done = terminal or truncated
-        next_action = model.predict(state, action)
-        model.update(state, action, reward, next_state, next_action, done)
-        state = next_state
-        action = next_action
-
-    # Evaluate the agent
-    success = []
-    for _ in range(eval_episodes):
-      state, _ = self.env.reset()
-      done = False
-
-      action = env.action_space.sample()
-      while not done:
-        action = model.predict(state, action)
-        next_state, reward, terminal, truncated, info = self.env.step(action)
-        done = terminal or truncated
-        state = next_state
-
-      success.append(1 if info.get("success", False) else 0)
-
-    success_rate = np.sum(success) / eval_episodes * 100
-    return success_rate
 
 
 if __name__ == "__main__":
@@ -202,3 +147,35 @@ if __name__ == "__main__":
   ))
   cv.search()
   cv.summary()
+
+
+class TrueOnlineTDLambdaReplayCV(TDZeroCV):
+  def new(self, **params):
+    return TrueOnlineTDLambdaReplay(
+        action_space=self.env.action_space,
+        observation_space=self.env.observation_space,
+        nrow=self.env.nrow,
+        ncol=self.env.ncol,
+        **params
+    )
+
+
+if __name__ == "__main__":
+  from Environments.RandomWalk import make_random_walk, estimate_goal_probability
+  from Environments.FrozenLake import make_frozen_lake
+
+  env = make_random_walk()  # Best Alpha: 0.0100, Gamma: 0.9500, Lambda: 0.9000
+  env = make_frozen_lake() # Best Alpha: 0.0100, Gamma: 0.9000, Lambda: 0.9000
+
+  param_grid = {
+      "alpha": [0.01, 0.05, 0.1, 0.5],
+      "gamma": [0.9, 0.95, 0.99],
+      "lambd": [0.5, 0.7, 0.9],
+  }
+
+  cv = TrueOnlineTDLambdaCV(env, param_grid)
+  cv.search()
+
+  estimate_goal_probability(env)
+  cv.summary()
+  cv.plot_metrics()

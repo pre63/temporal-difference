@@ -69,7 +69,7 @@ class TDZero:
 
       return int(best_action)
 
-  def update(self, state, reward, next_state, done):
+  def update(self, state, action, reward, next_state, next_action, done):
     current_value = 0 if self.value_table[state] == -np.inf else self.value_table[state]
     next_value = 0 if self.value_table[next_state] == -np.inf else self.value_table[next_state]
 
@@ -166,19 +166,23 @@ class TDZeroCV:
     rewards, steps, success = [], [], []
 
     for _ in range(episodes):
-      state, _ = self.env.reset()
-      model.reset()
       episode_rewards = []
       done = False
 
+      model.reset()
+
+      state, _ = self.env.reset()
+      action = model.policy(state)
+
       while not done:
-        action = model.policy(state)
         next_state, reward, terminated, truncated, info = self.env.step(action)
-        model.update(state, reward, next_state, done)
+        next_action = model.policy(state)
+        model.update(state, action, reward, next_state, next_action, done)
         done = terminated or truncated
 
         episode_rewards.append(reward)
         state = next_state
+        action = next_action
 
       rewards.append(sum(episode_rewards))
       steps.append(len(episode_rewards))
