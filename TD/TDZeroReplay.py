@@ -1,10 +1,7 @@
-
 import numpy as np
 
-
-from TD.TDZero import TDZero, TDZeroCV
-
-epsilon = 1e-10
+from TD.TDZero import TDZero
+from CrossValidation import GridSearchCV
 
 
 class TDZeroReplay(TDZero):
@@ -49,7 +46,7 @@ class TDZeroReplay(TDZero):
     self.value_table[self.value_table == 0] = -np.inf
 
 
-class TDZeroReplayCV(TDZeroCV):
+class TDZeroReplayCV(GridSearchCV):
 
   def new(self, **params):
     return TDZeroReplay(
@@ -69,12 +66,8 @@ if __name__ == "__main__":
   env = make_frozen_lake()  # alpha=0.002, gamma=0.6,  success_rate=90.00%
 
   param_grid = {
-      "alpha": [0.002, 0.0025, 0.003, 0.0035, 0.004, 0.0045, 0.005],
-      "gamma": [0.001, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
-  }
-  param_grid = {
-      "alpha": np.linspace(0.0001, 1.0, 50),
-      "gamma": np.linspace(0.0001, 1.0, 50),
+      "alpha": [0.002],
+      "gamma": [0.6],
   }
 
   cvr = TDZeroReplayCV(env, param_grid)

@@ -2,7 +2,7 @@ import numpy as np
 from itertools import product
 from TD.TDZero import TDZero, TDZeroCV
 
-# Scale features
+from CrossValidation import GridSearchCV
 
 
 def binary_basis_features(n_obs, n_actions):
@@ -44,6 +44,16 @@ class TrueOnlineTDLambdaReplay(TDZero):
     assert np.all(np.isfinite(self.A_bar)), "A_bar contains invalid values."
     assert np.all(np.isfinite(self.e)), "Eligibility trace contains invalid values."
     assert np.all(np.isfinite(self.e_bar)), "Auxiliary trace contains invalid values."
+
+  def __getstate__(self):
+    state = self.__dict__.copy()
+    if 'feature_func' in state:
+      del state['feature_func']
+    return state
+
+  def __setstate__(self, state):
+    self.__dict__.update(state)
+    self.feature_func = binary_basis_features(self.n_obs, self.n_actions)
 
   def reset(self):
     """Resets traces and auxiliary variables at the start of an episode."""
@@ -123,33 +133,7 @@ class TrueOnlineTDLambdaReplay(TDZero):
     return action
 
 
-class TrueOnlineTDLambdaReplayCV(TDZeroCV):
-  def new(self, **params):
-    return TrueOnlineTDLambdaReplay(
-        action_space=self.env.action_space,
-        observation_space=self.env.observation_space,
-        nrow=self.env.nrow,
-        ncol=self.env.ncol,
-        **params
-    )
-
-
-if __name__ == "__main__":
-  # Test TrueOnlineTDLambdaReplay
-  from Environments.FrozenLake import make_frozen_lake
-
-  env = make_frozen_lake()
-
-  cv = TrueOnlineTDLambdaReplayCV(env, param_grid=dict(
-      alpha=[0.01, 0.05, 0.1, 0.5],
-      gamma=[0.9, 0.95, 0.99],
-      lambd=[0.5, 0.7, 0.9]
-  ))
-  cv.search()
-  cv.summary()
-
-
-class TrueOnlineTDLambdaReplayCV(TDZeroCV):
+class TrueOnlineTDLambdaReplayCV(GridSearchCV):
   def new(self, **params):
     return TrueOnlineTDLambdaReplay(
         action_space=self.env.action_space,
@@ -165,7 +149,7 @@ if __name__ == "__main__":
   from Environments.FrozenLake import make_frozen_lake
 
   env = make_random_walk()  # Best Alpha: 0.0100, Gamma: 0.9500, Lambda: 0.9000
-  env = make_frozen_lake() # Best Alpha: 0.0100, Gamma: 0.9000, Lambda: 0.9000
+  env = make_frozen_lake()  # Best Alpha: 0.0100, Gamma: 0.9000, Lambda: 0.9000
 
   param_grid = {
       "alpha": [0.01, 0.05, 0.1, 0.5],

@@ -87,7 +87,10 @@ class TrueOnlineTDLambda(TDZero):
     self.v_old = 0
 
 
-class TrueOnlineTDLambdaCV(TDZeroCV):
+from CrossValidation import GridSearchCV
+
+
+class TrueOnlineTDLambdaCV(GridSearchCV):
   def new(self, **params):
     return TrueOnlineTDLambda(
         action_space=self.env.action_space,
