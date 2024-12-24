@@ -14,20 +14,27 @@ class TrueOnlineTDLambda(TDZero):
     self.e = np.zeros(num_features)  # Eligibility trace
     self.v_old = 0  # Previous value estimate
 
-  def update(self, phi, action, reward, phi_next, next_action, terminal):
+  def update(self, **kwargs):
+    state = kwargs.get("state")
+    reward = kwargs.get("reward")
+    next_state = kwargs.get("next_state")
+    done = kwargs.get("done")
+    self._update(state, reward, next_state, done)
+
+  def _update(self, phi, reward, phi_next, done):
     """
     Perform an update for a single time step.
 
     :param phi: Current feature vector.
     :param reward: Observed reward.
     :param phi_next: Next feature vector.
-    :param terminal: Whether the next state is terminal.
+    :param done: Whether the next state is done.
     """
     phi = phi / (np.linalg.norm(phi) + 1e-10)  # Normalize phi to prevent large values
     phi_next = phi_next / (np.linalg.norm(phi_next) + 1e-10)  # Normalize phi_next to prevent large values
 
     v = np.dot(self.theta, phi)  # Current value estimate
-    v_next = 0 if terminal else np.dot(self.theta, phi_next)  # Next value estimate
+    v_next = 0 if done else np.dot(self.theta, phi_next)  # Next value estimate
 
     delta = reward + self.gamma * v_next - v  # TD error
 
@@ -37,7 +44,7 @@ class TrueOnlineTDLambda(TDZero):
 
     # Update weights
     self.theta += delta * self.e + self.alpha * (v - self.v_old) * phi
-    self.v_old = v_next if not terminal else 0
+    self.v_old = v_next if not done else 0
 
   def predict(self, state):
     """

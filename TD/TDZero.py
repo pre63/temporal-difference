@@ -7,10 +7,12 @@ from itertools import product
 
 from CrossValidation import GridSearchCV
 
+from Specs import ModelBase
 
-class TDZero:
+
+class TDZero(ModelBase):
   def __init__(self, action_space, observation_space, nrow, ncol, alpha=0.1, gamma=0.99, epsilon=0.1, decay_rate=0.99, policy=None, **kwargs):
-
+    super().__init__()
     self.action_space = action_space
     self.observation_space = observation_space
     self.nrow = nrow
@@ -71,7 +73,14 @@ class TDZero:
 
       return int(best_action)
 
-  def update(self, state, action, reward, next_state, next_action, done):
+  def update(self, **kwargs):
+    state = kwargs.get("state")
+    reward = kwargs.get("reward")
+    next_state = kwargs.get("next_state")
+    done = kwargs.get("done")
+    self._update(state, reward, next_state, done)
+
+  def _update(self, state, reward, next_state, done):
     current_value = 0 if self.value_table[state] == -np.inf else self.value_table[state]
     next_value = 0 if self.value_table[next_state] == -np.inf else self.value_table[next_state]
 
@@ -97,7 +106,6 @@ class TDZeroCV(GridSearchCV):
     )
 
 
-
 if __name__ == "__main__":
   from Environments.RandomWalk import make_random_walk, estimate_goal_probability
   from Environments.FrozenLake import make_frozen_lake
@@ -119,4 +127,3 @@ if __name__ == "__main__":
 
   estimate_goal_probability(env)
   cv.summary()
-  cv.plot_metrics()

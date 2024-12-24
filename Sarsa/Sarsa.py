@@ -1,8 +1,11 @@
 import numpy as np
 
+from Specs import ModelBase
 
-class Sarsa:
+
+class Sarsa(ModelBase):
   def __init__(self, state_space_size, action_space_size, alpha=0.01, epsilon=1, decay_rate=0.99, gamma=0.99):
+    super().__init__()
     self.alpha = alpha
     self.epsilon = epsilon
     self.gamma = gamma

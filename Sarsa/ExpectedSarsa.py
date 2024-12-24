@@ -3,8 +3,10 @@ import matplotlib.pyplot as plt
 from matplotlib.gridspec import GridSpec
 from itertools import product
 
+from Specs import ModelBase
 
-class ExpectedSarsa:
+
+class ExpectedSarsa(ModelBase):
   def __init__(self, state_space_size, action_space_size, alpha=0.01, epsilon=1.0, decay_rate=0.99, gamma=0.99):
     self.alpha = alpha
     self.epsilon = epsilon
@@ -22,7 +24,15 @@ class ExpectedSarsa:
     else:
       return np.argmax(self.q_table[state])  # Exploit
 
-  def update(self, state, action, reward, next_state, next_action, done):
+  def update(self, **kwargs):
+    state = kwargs.get("state")
+    action = kwargs.get("action")
+    reward = kwargs.get("reward")
+    next_state = kwargs.get("next_state")
+    done = kwargs.get("done")
+    self._update(state, action, reward, next_state, done)
+
+  def _update(self, state, action, reward, next_state, done):
     current_q = self.q_table[state, action]
 
     if done:
@@ -55,7 +65,10 @@ class ExpectedSarsa:
     self.epsilon = params["epsilon"]
     self.gamma = params["gamma"]
 
+
 from CrossValidation import GridSearchCV
+
+
 class ExpectedSarsaCV(GridSearchCV):
   def new(self, **params):
     return ExpectedSarsa(

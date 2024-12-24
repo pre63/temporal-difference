@@ -14,7 +14,14 @@ class TDZeroReplay(TDZero):
     super().reset()
     self.eligibility_matrix = np.identity(self.state_space_size)
 
-  def update(self, state, action, reward, next_state, next_action, done):
+  def update(self, **kwargs):
+    state = kwargs.get("state")
+    reward = kwargs.get("reward")
+    next_state = kwargs.get("next_state")
+    done = kwargs.get("done")
+    self._update(state, reward, next_state, done)
+
+  def _update(self, state, reward, next_state, done):
     # Handle initialization for the first visit
     if self.value_table[state] == -np.inf:
       self.value_table[state] = 0

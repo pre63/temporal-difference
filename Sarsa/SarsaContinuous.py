@@ -1,9 +1,12 @@
 import numpy as np
 from Sarsa.IHT import IHT, tiles
 
+from Specs import ModelBase
 
-class SarsaContinuous:
+
+class SarsaContinuous(ModelBase):
   def __init__(self, action_space, alpha=0.01, epsilon=0.1, gamma=1, tilings=20, max_episode_steps=10000, action_resolution=3):
+    super().__init__()
     self.alpha = alpha
     self.epsilon = epsilon
     self.gamma = gamma
@@ -25,11 +28,11 @@ class SarsaContinuous:
   def q_(self, feature):
     return np.dot(self.w, feature)
 
-  def update(self, reward, current_q, future_q, feature, terminal):
+  def update(self, reward, state, next_state, feature, terminal):
     if terminal:
-      w_update = self.alpha * (reward - current_q)
+      w_update = self.alpha * (reward - state)
     else:
-      w_update = self.alpha * (reward + self.gamma * future_q - current_q)
+      w_update = self.alpha * (reward + self.gamma * next_state - state)
     self.w += np.multiply(w_update, feature)
 
   def one_hot_encode(self, indices):
@@ -126,4 +129,3 @@ class SarsaContinuous:
     self.w = data["weights"]
     self.tile_coding = IHT(self.tilings**4)
     self.tile_coding.dictionary = data["tile_coding"].item()
-
