@@ -1,5 +1,8 @@
+wheel
 numpy
 matplotlib
 seaborn
 gymnasium
 gymnasium[classic-control]
+gymnasium[box2d]
+scipy

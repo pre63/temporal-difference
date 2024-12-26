@@ -3,17 +3,8 @@ import numpy as np
 import gymnasium as gym
 
 
-# Registry for reward strategies
-REWARD_STRATEGIES = {
-    "default": default_reward,
-    "proximity": proximity_reward,
-    "energy": energy_efficient_reward,
-    "combined": combined_reward,
-}
-
-
-def make_lunar_lander(reward_strategy="default"):
-  env = gym.make("LunarLanderContinuous-v3")
+def make_lunar_lander(reward_strategy="default", render_mode=None, continuous=True):
+  env = gym.make("LunarLanderContinuous-v3" if continuous else "LunarLander-v3", render_mode=render_mode)
   env = LunarLanderRewardWrapper(env, reward_strategy)
   return env
 
@@ -153,3 +144,12 @@ def check_success(observation,
   success = terminated and lander_is_upright and lander_within_landing_pad and velocities_within_limits and legs_in_contact and y_position >= 0
 
   return success
+
+
+# Registry for reward strategies
+REWARD_STRATEGIES = {
+    "default": default_reward,
+    "proximity": proximity_reward,
+    "energy": energy_efficient_reward,
+    "combined": combined_reward,
+}
