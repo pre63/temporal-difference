@@ -44,4 +44,6 @@ class FrozenLakeWrapper(gym.Wrapper):
 def make_frozen_lake(render_mode=None, max_episode_steps=50, desc=None, map_name="4x4", is_slippery=True):
   env = gym.make("FrozenLake-v1", render_mode=render_mode, desc=desc, map_name=map_name, is_slippery=is_slippery)
   env = TimeLimit(env, max_episode_steps=max_episode_steps)
-  return FrozenLakeWrapper(env)
+  env = FrozenLakeWrapper(env)
+  env.make_func_name = "make_frozen_lake"
+  return env

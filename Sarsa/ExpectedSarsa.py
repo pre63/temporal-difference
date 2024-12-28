@@ -3,10 +3,10 @@ import matplotlib.pyplot as plt
 from matplotlib.gridspec import GridSpec
 from itertools import product
 
-from Specs import ModelBase
+from Specs import AlgoSpecs
 
 
-class ExpectedSarsa(ModelBase):
+class ExpectedSarsa(AlgoSpecs):
   def __init__(self, state_space_size, action_space_size, alpha=0.01, epsilon=1.0, decay_rate=0.99, gamma=0.99):
     self.alpha = alpha
     self.epsilon = epsilon

@@ -1,6 +1,6 @@
 import numpy as np
 from Sarsa.IHT import IHT, tiles
-from Specs import ModelBase
+from Specs import AlgoSpecs
 from ExpectedSarsa import ExpectedSarsa
 
 

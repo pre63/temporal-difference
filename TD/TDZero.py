@@ -7,10 +7,10 @@ from itertools import product
 
 from CrossValidation import GridSearchCV
 
-from Specs import ModelBase
+from Specs import AlgoSpecs
 
 
-class TDZero(ModelBase):
+class TDZero(AlgoSpecs):
   def __init__(self, action_space, observation_space, nrow, ncol, alpha=0.1, gamma=0.99, epsilon=0.1, decay_rate=0.99, policy=None, **kwargs):
     super().__init__()
     self.action_space = action_space

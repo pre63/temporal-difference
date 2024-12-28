@@ -6,3 +6,5 @@ gymnasium
 gymnasium[classic-control]
 gymnasium[box2d]
 scipy
+torch
+torchvision

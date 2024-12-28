@@ -1,4 +1,4 @@
-class ModelBase:
+class AlgoSpecs:
   def policy(self, state):
     pass
 

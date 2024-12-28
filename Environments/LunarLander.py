@@ -6,8 +6,11 @@ import gymnasium as gym
 def make_lunar_lander(reward_strategy="default", render_mode=None, continuous=True):
   env = gym.make("LunarLanderContinuous-v3" if continuous else "LunarLander-v3", render_mode=render_mode)
   env = LunarLanderRewardWrapper(env, reward_strategy)
+  env.make_func_name = "make_frozen_lake" if continuous else "make_lunar_lander_continuous"
   return env
 
+def make_lunar_lander_continuous(reward_strategy="default", render_mode=None):
+  return make_lunar_lander(reward_strategy, render_mode, continuous=True)
 
 class LunarLanderRewardWrapper(gym.Wrapper):
   def __init__(self, env, reward_strategy):
@@ -21,9 +24,13 @@ class LunarLanderRewardWrapper(gym.Wrapper):
     self.reward_fn = REWARD_STRATEGIES[reward_strategy]
 
   def step(self, action):
-    state, reward, terminated, truncated, info = self.env.step(action)
-    custom_reward = self.reward_fn(state, reward, action, terminated or truncated, info)
-    return state, custom_reward, terminated, truncated, info
+    try:
+      state, reward, terminated, truncated, info = self.env.step(action)
+      custom_reward = self.reward_fn(state, reward, action, terminated or truncated, info)
+      return state, custom_reward, terminated, truncated, info
+    except Exception as e:
+      print(f"Action: {action}")
+      raise e
 
 
 def default_reward(state, reward, action, done, info):

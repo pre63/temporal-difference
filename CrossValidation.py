@@ -9,6 +9,66 @@ from itertools import product
 from Specs import SearchCV
 
 
+import os
+from datetime import datetime
+
+from Replay import save_config
+
+
+def withSave(cv, save_dir="models", model_path=None, **search_params):
+  """
+  Executes a complete workflow: search, evaluation, summary, saving plots, saving the model, 
+  and saving the configuration.
+
+  Parameters:
+      cv: The cross-validation object with the necessary methods (search, summary, plot_metrics, get_best_model).
+      save_dir (str): The base directory for saving models and configurations.
+      **search_params (dict): Optional parameters to override the default search behavior.
+  """
+  # Perform the search with the provided parameters
+  if search_params is None:
+    search_params = {"episodes": 1000}
+  cv.search(**search_params)
+
+  # Generate a summary
+  cv.summary()
+
+  # Create a timestamped directory for saving results
+  now = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+  path = os.path.join(save_dir, f"Experiment-{now}")
+  os.makedirs(path, exist_ok=True)
+
+  # Save plots
+  save_path = os.path.join(path, "metrics.png")
+  save_path_best = os.path.join(path, "metrics_best.png")
+
+  cv.plot_metrics(save_path=save_path)
+  print(f"Saved plot to {save_path}")
+
+  cv.plot_metrics(save_path=save_path_best, best_model=True)
+  print(f"Saved plot to {save_path_best}")
+
+  # Get the best model
+  model = cv.get_best_model()
+  print(f"Best Model: {model}, {type(model)}, {model.__class__.__name__}, module: {model.__module__}")
+
+  # Derive configuration details
+  model_path = model_path if not None else model.__module__  # Dynamically get the module path of the model
+  model_class = model.__class__.__name__  # Dynamically get the model class name
+  env_module = cv.env.__module__  # Dynamically get the module path of the environment
+  env_name = cv.env.make_func_name  # Dynamically get the environment creation function name
+
+  # Save the configuration
+  model_file_path = save_config(path, model_path, model_class, env_module, env_name)
+
+  # Save the model to the derived path
+  model.save(model_file_path)
+
+  # Print replay command
+  print("Replay:\n")
+  print(f"    python Replay.py {path}\n")
+
+
 class GridSearchCV(SearchCV):
   def __init__(self, env, param_grid):
     self.env = env
@@ -17,10 +77,17 @@ class GridSearchCV(SearchCV):
     self.episode_rewards = []
     self.episode_steps = []
     self.value_function = []
+    self.td_errors = []
 
-    print("Number of permutations:", len(param_grid["alpha"]) * len(param_grid["gamma"]))
-    print("Alpha values:", [float(f"{x:.4f}") for x in param_grid['alpha']])
-    print("Gamma values:", [float(f"{x:.4f}") for x in param_grid['gamma']])
+    num_permution_for_all_params = np.prod([len(param_grid[key]) for key in param_grid.keys()])
+    print("Number of permutations:", num_permution_for_all_params)
+    print(f"Parameters")
+    for key, values in param_grid.items():
+      processed_values = [
+          v if isinstance(v, (int, str, float)) else v.__class__.__name__
+          for v in values
+      ]
+      print(f"  {key}: {processed_values}")
 
   def new(self, **params):
     pass
@@ -39,6 +106,7 @@ class GridSearchCV(SearchCV):
       )
 
   def _evaluate_model(self, model, trials=100):
+    trials = max(trials, 1)
     success, rewards = 0, 0
 
     for _ in range(trials):
@@ -79,10 +147,20 @@ class GridSearchCV(SearchCV):
         'params': params,
         'avg_success': avg_success,
         'avg_rewards': avg_rewards,
-        'samples': all_data
+        'avg_td_error': np.mean(best_model.td_errors) if hasattr(best_model, 'td_errors') else 0.0,
+        'td_errors': best_model.td_errors if hasattr(best_model, 'td_errors') else [],
+        'samples': all_data,
+        'model': best_model
+    }  # Compute the RMSE for TD errors
+
+    avg_td_error = np.sqrt(np.mean(np.square(result['td_errors'])))
+
+    formatted_params = {
+        k: (v if isinstance(v, (int, str, float)) else v.__class__.__name__)
+        for k, v in params.items()
     }
 
-    print(f"Alpha: {params['alpha']:.4f}, Gamma: {params['gamma']:.4f}, Avg Success: {avg_success:.2f}%, Avg Rewards: {avg_rewards:.2f}")
+    print(f"Params: {formatted_params}, Avg Success: {avg_success:.2f}%, Avg Rewards: {avg_rewards:.2f}, RMSE TD Error: {avg_td_error:.2f}")
 
     return result
 
@@ -137,13 +215,44 @@ class GridSearchCV(SearchCV):
         value_func.append(None)  # Handle out-of-bounds predictions
     return value_func
 
-  def summary(self):
-    top_5 = sorted(self.results, key=lambda x: x['avg_success'], reverse=True)[:5]
+  def get_best_model(self, search_function=None):
+    if search_function is None:
+      def search_function(results):
+        result = sorted(results, key=lambda x: x['avg_success'], reverse=True)[0]
+        sample = sorted(result['samples'], key=lambda x: x['success'], reverse=True)[0]
+        return sample['model']
+
+    return search_function(self.results)
+
+  def summary(self, sort_lambda=None):
+    """
+    Print the top 5 results based on the average success rate.
+    This funciton also sorts the results based on the provided lambda function.
+    Parameters:
+        sort_lambda (function): A lambda function to sort the results, defaults to sorting on average success rate.
+    """
+    if sort_lambda is None:
+      def sort_lambda(x): return x['avg_success']
+
+    self.results = sorted(self.results, key=sort_lambda, reverse=True)
+
+    top_5 = self.results[:5]
     print("Top 5 Results:")
     for i, result in enumerate(top_5):
-      print(f"Run {i + 1}: {result['params']}, Avg Success: {result['avg_success']:.2f}%, Avg Rewards: {result['avg_rewards']:.2f}")
+      formatted_params = {
+          k: (v if isinstance(v, (int, str, float)) else v.__class__.__name__)
+          for k, v in result['params'].items()
+      }
+      avg_td_error = np.sqrt(np.mean(np.square(result['td_errors']))) if 'td_errors' in result else float('nan')
+      print(f"Run {i + 1}: Params: {formatted_params}, Avg Success: {result['avg_success']:.2f}%, Avg Rewards: {result['avg_rewards']:.2f}, RMSE TD Error: {avg_td_error:.2f}")
 
-  def plot_metrics(self, index=None):
+  def plot_metrics(self, save_path=None, index=None, best_model=False):
+    """
+    Plot the rewards, steps, value function, and TD errors for the top 5 results.
+    Parameters:
+        save_path (str): The path to save the plot as an image file.
+        index (int): The index of the result to plot, defaults to the best result.
+    """
     if index is not None:
       if index < 0 or index >= len(self.results):
         print(f"Invalid index: {index}. Please provide a valid index.")
@@ -156,16 +265,20 @@ class GridSearchCV(SearchCV):
         return
       result = top_5[0]
 
-    samples = result['samples']
+    samples = (
+        [max(result['samples'], key=lambda s: s['success'])]
+        if best_model else
+        result['samples']
+    )
 
-    plt.figure(figsize=(12, 8))
-    gs = GridSpec(2, 2)
+    plt.figure(figsize=(14, 12))
+    gs = GridSpec(3, 2)
 
     # Plot rewards per episode for all samples
     ax1 = plt.subplot(gs[0, 0])
     for j, sample in enumerate(samples):
       ax1.plot(sample['rewards'], label=f"Sample {j + 1}")
-    ax1.set_title(f"Rewards per Episode")
+    ax1.set_title("Rewards per Episode")
     ax1.set_xlabel("Episode")
     ax1.set_ylabel("Total Rewards")
     ax1.legend()
@@ -174,22 +287,109 @@ class GridSearchCV(SearchCV):
     ax2 = plt.subplot(gs[0, 1])
     for j, sample in enumerate(samples):
       ax2.plot(sample['steps'], label=f"Sample {j + 1}")
-    ax2.set_title(f"Steps per Episode")
+    ax2.set_title("Steps per Episode")
     ax2.set_xlabel("Episode")
     ax2.set_ylabel("Steps")
     ax2.legend()
 
-    # Plot value function for all samples as a line plot
-    ax3 = plt.subplot(gs[1, :])
+    # Plot value function for all samples
+    ax3 = plt.subplot(gs[1, 0])
     for j, sample in enumerate(samples):
       ax3.plot(sample['value_function'], label=f"Sample {j + 1}")
-    ax3.set_title(f"Value Function")
+    ax3.set_title("Value Function")
     ax3.set_xlabel("State Index")
     ax3.set_ylabel("Predicted Value")
     ax3.legend()
 
+    # Plot TD Error for all samples and compute RMSE
+    ax4 = plt.subplot(gs[1, 1])
+    rmse_td_errors = []
+    for j, sample in enumerate(samples):
+      model = sample['model']  # Access the model object from each sample
+      if hasattr(model, 'td_errors') and model.td_errors:
+        td_errors = model.td_errors
+        ax4.plot(td_errors, label=f"Sample {j + 1}")
+        rmse = np.sqrt(np.mean(np.square(td_errors)))
+        rmse_td_errors.append(rmse)
+
+    # Compute average RMSE across samples
+    avg_rmse_td_error = np.mean(rmse_td_errors) if rmse_td_errors else float('nan')
+    ax4.set_title(f"TD Error (Avg RMSE: {avg_rmse_td_error:.2f})")
+    ax4.set_xlabel("Steps")
+    ax4.set_ylabel("TD Error")
+    ax4.legend()
+
     plt.tight_layout()
-    plt.show()
+    if save_path is not None:
+      plt.savefig(save_path)
+    else:
+      plt.show()
+
+
+class ContinuousGridSearchCV(GridSearchCV):
+
+  def _generate_value_function(self, model):
+    """
+    Generate the value function for continuous state-action spaces.
+
+    Args:
+        model: The model to use for value function prediction.
+
+    Returns:
+        np.ndarray: The value function approximations over sampled states.
+    """
+    sampled_states = np.linspace(
+        self.env.observation_space.low, self.env.observation_space.high, num=100
+    )
+    value_func = []
+    for state in sampled_states:
+      state = np.array(state)
+      value = model.predict(state)
+      value_func.append(value)
+    return value_func
+
+
+class LunarLanderContinuousGridSearchCV(GridSearchCV):
+  def _generate_value_function(self, model, resolution=100):
+    """
+    Generate the value function for continuous state-action spaces using a sigmoid gradient.
+
+    Args:
+        model: The model to use for value function prediction.
+        resolution: Number of points to sample along the sigmoid gradient.
+
+    Returns:
+        Tuple[np.ndarray, np.ndarray]: Grid of states and corresponding predictions.
+    """
+    # Define bounds for the first six state dimensions
+    state_bounds = np.array([self.env.observation_space.low, self.env.observation_space.high]).T[:6]
+
+    # Generate a sigmoid gradient from 0 to 1
+    sigmoid = 1 / (1 + np.exp(-np.linspace(-6, 6, resolution)))  # Sigmoid over [-6, 6]
+
+    # Scale the sigmoid gradient to match the bounds of each dimension
+    gradient = [
+        bounds[0] + sigmoid * (bounds[1] - bounds[0])
+        for bounds in state_bounds
+    ]
+
+    # Generate all combinations where all six values increment simultaneously
+    state_grid = np.array([gradient[dim] for dim in range(6)]).T
+
+    # Fix other dimensions (dimensions 6 and 7) to representative values
+    fixed_values = [0, 0]  # No leg contact
+    fixed_states = np.hstack([
+        state_grid,
+        np.tile(fixed_values, (state_grid.shape[0], 1))
+    ])
+
+    # Predict values for each state in the grid
+    predictions = []
+    for state in fixed_states:
+      value = model.predict(state)
+      predictions.append(value)
+
+    return np.array(predictions)
 
 
 class LocalAdaptiveGridSearchCV(SearchCV):

@@ -18,10 +18,6 @@ from gymnasium.envs.toy_text.utils import categorical_sample
 WEST, EAST = 0, 1
 
 
-def make_random_walk(n_states=19, p_stay=0.1, p_backward=0.4, max_blocks=40, render_mode=None, verbose=0):
-  return WalkEnv(n_states=n_states, p_stay=p_stay, p_backward=p_backward, max_blocks=max_blocks, render_mode=render_mode, verbose=verbose)
-
-
 class WalkEnv(gym.Env):
   """
   Random Walk Environment for Reinforcement Learning.
@@ -264,6 +260,75 @@ class WalkEnv(gym.Env):
     self.clock.tick(self.metadata["render_fps"])
 
 
+class ContinuousWalkEnv(WalkEnv):
+  """
+  Continuous Random Walk Environment for Reinforcement Learning.
+  Extends the base WalkEnv to use continuous state and action spaces.
+  """
+
+  def __init__(self, n_states, p_stay, p_backward, max_blocks, render_mode, verbose):
+    super().__init__(n_states, p_stay, p_backward, max_blocks, render_mode, verbose)
+    self.observation_space = spaces.Box(
+        low=0.0, high=float(n_states + 1), shape=(1,), dtype=np.float32
+    )
+    self.action_space = spaces.Box(
+        low=-1.0, high=1.0, shape=(1,), dtype=np.float32
+    )
+
+  def step(self, action):
+    """
+    Override the step function to handle continuous actions.
+    """
+    self.current_step += 1
+
+    if not self.action_space.contains(action):
+      action = np.clip(action, self.action_space.low, self.action_space.high)
+
+    # Continuous action controls movement
+    action = action[0]  # Convert single-element array to scalar
+    move = np.sign(action)  # Determine direction: -1 (left), +1 (right), 0 (stay)
+    step_size = min(abs(action), 1.0)  # Limit step size to 1.0
+
+    if move < 0:
+      next_state = max(0, self.s - int(step_size))
+    elif move > 0:
+      next_state = min(self.nS - 1, self.s + int(step_size))
+    else:
+      next_state = self.s
+
+    reward = 1.0 if next_state == self.nS - 1 else 0.0
+    terminated = next_state in [0, self.nS - 1]
+    truncated = self.current_step >= self.max_blocks
+    self.s = next_state
+
+    info = {"success": terminated and next_state == self.nS - 1}
+    return int(self.s), reward, terminated, truncated, info
+
+
+def make_random_walk(n_states=19, p_stay=0.1, p_backward=0.4, max_blocks=40, render_mode=None, verbose=0, continuous=False):
+  """
+  Create a Random Walk environment.
+
+  Parameters:
+  - n_states (int): Number of intermediate states.
+  - p_stay (float): Probability of staying in the same state.
+  - p_backward (float): Probability of moving backward.
+  - max_blocks (int): Maximum steps per episode.
+  - render_mode (str): Rendering mode.
+  - verbose (int): Verbosity level for logging.
+  - continuous (bool): Whether to use a continuous observation and action space.
+
+  Returns:
+  - env (WalkEnv or ContinuousWalkEnv): The configured Random Walk environment.
+  """
+  if continuous:
+    env = ContinuousWalkEnv(n_states, p_stay, p_backward, max_blocks, render_mode, verbose)
+  else:
+    env = WalkEnv(n_states, p_stay, p_backward, max_blocks, render_mode, verbose)
+  env.make_func_name = "make_random_walk"
+  return env
+
+
 def plot_transition_matrix(env):
   # Adjust for terminal states
   n_states = env.shape[1] - 2  # Exclude start and terminal states
@@ -325,7 +390,7 @@ def plot_rewards(env):
   plt.show()
 
 
-def estimate_goal_probability(env, num_simulations=100000):
+def estimate_goal_probability(env, num_simulations=1000):
   """
   Estimate the probability of reaching the goal in a random walk MDP.
 

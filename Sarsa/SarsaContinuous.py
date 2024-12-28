@@ -3,10 +3,10 @@ from itertools import product
 from scipy.sparse import csr_matrix
 
 from Sarsa.IHT import IHT, tiles
-from Specs import ModelBase
+from Specs import AlgoSpecs
 
 
-class SarsaContinuous(ModelBase):
+class SarsaContinuous(AlgoSpecs):
   def __init__(self, observation_space, action_space, alpha=0.01, epsilon=0.1, gamma=1, tilings=20, max_episode_steps=10000, action_resolution=3):
     super().__init__()
     self.alpha = alpha
