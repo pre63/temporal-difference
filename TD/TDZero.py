@@ -11,7 +11,7 @@ from Specs import AlgoSpecs
 
 
 class TDZero(AlgoSpecs):
-  def __init__(self, action_space, observation_space, nrow, ncol, alpha=0.1, gamma=0.99, epsilon=0.1, decay_rate=0.99, policy=None, **kwargs):
+  def __init__(self, action_space, observation_space, nrow, ncol, alpha=0.1, gamma=0.99, epsilon=1, decay_rate=0.99, policy=None, **kwargs):
     super().__init__()
     self.action_space = action_space
     self.observation_space = observation_space
@@ -86,6 +86,9 @@ class TDZero(AlgoSpecs):
 
     td_target = reward + (0 if done else self.gamma * next_value)
     td_error = td_target - current_value
+
+    self.td_errors.append(td_error)
+
     new_value = self.alpha * td_error
 
     assert not np.isinf(new_value)
@@ -116,10 +119,6 @@ if __name__ == "__main__":
   param_grid = {
       "alpha": np.linspace(0.0001, 1.0, 50),
       "gamma": np.linspace(0.0001, 1.0, 50),
-  }
-  param_grid = {
-      "alpha": [0.003],
-      "gamma": [0.2],
   }
 
   cv = TDZeroCV(env, param_grid)

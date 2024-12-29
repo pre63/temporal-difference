@@ -17,8 +17,11 @@ class FrozenLakeWrapper(gym.Wrapper):
     return self.env.reset()
 
   def step(self, action):
-
-    state, reward, terminated, truncated, info = self.env.step(action)
+    try:
+      state, reward, terminated, truncated, info = self.env.step(action)
+    except Exception as e:
+      print("An error occurred, action:", action)
+      raise e
 
     # Add success info to info dict
     info["success"] = reward == 1

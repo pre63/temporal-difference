@@ -1,4 +1,7 @@
 class AlgoSpecs:
+  def __init__(self, **kwargs):
+    self.td_errors = []
+
   def policy(self, state):
     pass
 
