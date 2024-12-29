@@ -50,7 +50,6 @@ def withSave(cv, save_dir="models", model_path=None, **search_params):
 
   # Get the best model
   model = cv.get_best_model()
-  print(f"Best Model: {model}, {type(model)}, {model.__class__.__name__}, module: {model.__module__}")
 
   # Derive configuration details
   model_path = model_path if not None else model.__module__  # Dynamically get the module path of the model

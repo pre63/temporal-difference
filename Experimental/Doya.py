@@ -167,21 +167,19 @@ class Search(ContinuousGridSearchCV):
 
 if __name__ == "__main__":
   now = datetime.now().strftime("%Y%m%d%H%M%S")
-  save_path = f"results/Doya-{now}.png"
-  save_path_best = f"results/Doya-{now}-best.png"
 
   from Environments.Pendulum import make_pendulum
   param_grid = {
-      "alpha": [0.001, 0.005, 0.01, 0.05, 0.1],
+      "alpha": [0.001, 0.005, 0.01],
       "epsilon": [0.001, 0.005, 0.01, 0.02, 0.05],
       "decay_rate": [0.001, 0.01, 0.05, 0.1, 0.2],
-      "gamma": [0.8, 0.85, 0.9, 0.95, 0.99],
+      "gamma": [0.99],
       "tau": [0.5, 1.0, 2.0],
-      "grid_size": [8, 10, 12, 16],
+      "grid_size": [12, 16],
       "rbf_variance": [0.01, 0.05, 0.1, 0.2],
-      "max_torque": [2, 3, 5, 10]
+      "max_torque": [10]
   }
 
   env = make_pendulum()
 
-  withSave(Search(env, param_grid), model_path="Experimental.Doya", episodes=100)
+  withSave(Search(env, param_grid), model_path="Experimental.Doya", episodes=4000, samples=3)
